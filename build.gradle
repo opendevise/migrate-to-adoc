@@ -1,0 +1,130 @@
+buildscript {
+    repositories { jcenter() }
+    dependencies {
+        classpath 'com.github.jruby-gradle:jruby-gradle-plugin:1.5.0'
+        classpath 'de.qaware.seu.as.code:seuac-git-plugin:2.4.0'
+        classpath 'org.yaml:snakeyaml:1.21'
+    }
+}
+
+apply plugin: 'com.github.jruby-gradle.base'
+apply plugin: 'de.qaware.seu.as.code.git'
+
+dependencies {
+    jrubyExec 'rubygems:kramdown-asciidoc:1.0.0.alpha.13'
+    jrubyExec 'rubygems:rjgit:4.11.0.0'
+}
+
+jruby {
+    execVersion '9.2.0.0'
+}
+
+def assembly = new org.yaml.snakeyaml.Yaml().load(file('assembly.yml').text)
+
+ext {
+    rootProjectDir = '../..'
+    upstreamProjectDir = "${rootProjectDir}/src"
+    docsUpstreamDir = "${upstreamProjectDir}/doc/src/main/markdown"
+    docsBuildDir = "${buildDir}/markdown"
+    docsPublishDir = "${buildDir}/docs"
+}
+
+git {
+    upstream {
+        url assembly.repos.upstream.url
+        branch assembly.repos.upstream.branch
+        directory file(upstreamProjectDir)
+        options {
+            clone.singleBranch = true
+        }
+    }
+    destination {
+        url assembly.repos.destination.url
+        branch assembly.repos.destination.branch
+        username System.env.GITHUB_TOKEN
+        directory file(docsPublishDir)
+        options {
+            commit {
+                message = assembly.commit.message
+                author {
+                  //username = assembly.commit.author.name
+                  email = assembly.commit.author.email
+                }
+            }
+            clone.singleBranch = true
+        }
+    }
+}
+
+def hasChanges(directory) {
+    def dirty = false
+    def repo = null
+    try {
+      repo = org.eclipse.jgit.api.Git.open(directory)
+      dirty = !repo.status().call().isClean()
+    } finally {
+      if (repo) repo.close()
+    }
+    dirty
+}
+
+task copyImages(type: Copy) {
+    from '.'
+    include '*/images/*.png'
+    includeEmptyDirs false
+    eachFile { path = name }
+    into "${docsBuildDir}/images"
+}
+
+task compileDocs(group: 'Documentation', description: 'Overlays the documentation from this directory onto the documentation from Product.') {
+    dependsOn copyImages
+    doLast {
+        assembly.files.each { target, sources ->
+          ant.concat(destfile: "${docsBuildDir}/${target}") {
+            sources.each { source ->
+              if (source.startsWith('^')) {
+                filelist(dir: docsUpstreamDir, files: source.substring(1))
+              } else {
+                filelist(dir: projectDir, files: source)
+              }
+            }
+          }
+        }
+        assembly.replacements.each { match, replace ->
+          ant.replaceregexp(match: match, replace: replace, flags: 'g', byline: 'true') {
+            fileset(dir: docsBuildDir, includes: '*.md')
+          }
+        }
+    }
+}
+
+task cleanDestination(type: Delete) {
+    delete(docsPublishDir)
+}
+
+task convertDocsToAntora(type: com.github.jrubygradle.JRubyExec, group: 'Documentation', description: 'Converts the documentation from Markdown to AsciiDoc and organizes it as an Antora component.') {
+    script 'convert-docs-to-antora.rb'
+    scriptArgs assembly.target.component, assembly.target.version, assembly.target.module, assembly.repos.destination.branch
+    doLast {
+        if (System.env.PUBLISH && hasChanges(tasks.gitCommitDestination.directory)) {
+            // author.username gets dropped, so we have to reassign
+            tasks.gitCommitDestination.author.username = assembly.commit.author.name
+            tasks.gitCommitDestination.doCommit()
+            tasks.gitPushDestination.doPush()
+            // NOTE indicate that a change was pushed
+            file("${docsPublishDir}/.trigger-build").createNewFile()
+        }
+    }
+}
+
+afterEvaluate {
+    if (file("${upstreamProjectDir}/.git").directory) {
+        tasks.compileDocs.dependsOn gitPullUpstream
+    }
+    else {
+        delete(upstreamProjectDir)
+        tasks.compileDocs.dependsOn gitCloneUpstream
+    }
+    tasks.gitCloneDestination.dependsOn cleanDestination
+    tasks.convertDocsToAntora.dependsOn gitCloneDestination, compileDocs
+}

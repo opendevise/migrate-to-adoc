@@ -1,0 +1,27 @@
+repos:
+  upstream:
+    url: https://github.com/org/src.git
+    branch: v6.0
+  destination:
+    url: https://github.com/org/dest.git
+    branch: v6.0
+target:
+  component: product
+  version: '6.0'
+  module: ROOT
+commit:
+  message: regenerate docs for Antora
+  author:
+    name: bot
+    email: bot@example.org
+# the keys in files are the compiled files
+# the values are the files to combine to make the compiled files
+# if a value starts with ^, it means to retrieve it from the upstream project
+files:
+  nav.md: [ nav.md ]
+  introduction.md: [ start/introduction.md ]
+  config.md: [ installation/config_title.md, ../CONFIG.md ]
+  error-codes.md: [ errors/error-codes.md ]
+  tutorial.md: [ tutorial.md ]
+replacements:
+  Old Name: New Name
