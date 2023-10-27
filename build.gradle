@@ -11,7 +11,7 @@ apply plugin: 'com.github.jruby-gradle.base'
 apply plugin: 'de.qaware.seu.as.code.git'
 
 dependencies {
-    jrubyExec 'rubygems:kramdown-asciidoc:1.0.0.alpha.13'
+    jrubyExec 'rubygems:kramdown-asciidoc:2.1.0'
     jrubyExec 'rubygems:rjgit:4.11.0.0'
 }
 
